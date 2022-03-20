@@ -31,14 +31,9 @@ TODO:
 #ifndef __BME280_H__
 #define __BME280_H__
 
-#if (ARDUINO >= 100)
-#include "Arduino.h"
-#else
-#include "WProgram.h"
-#endif
+#include <cstdint>
 
 #include <Wire.h>
-#include <SPI.h>
 
 // Uncomment the following line to enable software I2C
 // You will need to have the SoftwareWire library installed
@@ -46,19 +41,6 @@ TODO:
 // manager.
 
 #define I2C_MODE 0
-#define SPI_MODE 1
-
-#ifndef BME280_SPI_CLOCK
-#ifdef ARDUINO_ARCH_ESP32
-#define BME280_SPI_CLOCK 1000000
-#else
-#define BME280_SPI_CLOCK 500000
-#endif
-#endif
-
-#ifndef BME280_SPI_MODE
-#define BME280_SPI_MODE SPI_MODE0
-#endif
 
 #define NO_WIRE 0
 #define HARD_WIRE 1
@@ -131,10 +113,7 @@ TODO:
 struct BME280_SensorSettings {
 public:
   // Main Interface and mode settings
-  uint8_t commInterface;
   uint8_t I2CAddress;
-  uint8_t chipSelectPin;
-  SPISettings spiSettings{BME280_SPI_CLOCK, MSBFIRST, BME280_SPI_MODE};
 
   // Deprecated settings
   uint8_t runMode;
@@ -196,7 +175,6 @@ public:
   // Call to apply BME280_SensorSettings.
   // This also gets the SensorCalibration constants
   uint8_t begin(void);
-  bool beginSPI(uint8_t csPin);            // Communicate using SPI
   bool beginI2C(TwoWire &wirePort = Wire); // Called when user provides Wire
                                            // port
 
