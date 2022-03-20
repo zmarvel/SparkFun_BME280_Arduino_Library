@@ -33,18 +33,7 @@ TODO:
 
 #include <cstdint>
 
-#include <Wire.h>
-
-// Uncomment the following line to enable software I2C
-// You will need to have the SoftwareWire library installed
-//#include <SoftwareWire.h> //SoftwareWire by Testato. Installed from library
-// manager.
-
-#define I2C_MODE 0
-
-#define NO_WIRE 0
-#define HARD_WIRE 1
-#define SOFT_WIRE 2
+#include <driver/i2c.h>
 
 #define MODE_SLEEP 0b00
 #define MODE_FORCED 0b01
@@ -99,6 +88,8 @@ TODO:
 #define BME280_HUMIDITY_MSB_REG 0xFD     // Humidity MSB
 #define BME280_HUMIDITY_LSB_REG 0xFE     // Humidity LSB
 
+namespace SparkFun {
+
 // Class BME280_SensorSettings.  This object is used to hold settings data.  The
 // application uses this classes' data directly.  The settings are adopted and
 // sent to the sensor at special times, such as .begin.  Some are used for doing
@@ -111,24 +102,12 @@ TODO:
 // specific read and write command directly to the IC. (ST #defines below)
 //
 struct BME280_SensorSettings {
-public:
-  // Main Interface and mode settings
-  uint8_t I2CAddress;
-
-  // Deprecated settings
-  uint8_t runMode;
-  uint8_t tStandby;
-  uint8_t filter;
-  uint8_t tempOverSample;
-  uint8_t pressOverSample;
-  uint8_t humidOverSample;
-  float tempCorrection; // correction of temperature - added to the result
+  float tempCorrection;
 };
 
 // Used to hold the calibration constants.  These are used
 // by the driver as measurements are being taking
 struct SensorCalibration {
-public:
   uint16_t dig_T1;
   int16_t dig_T2;
   int16_t dig_T3;
@@ -152,7 +131,6 @@ public:
 };
 
 struct BME280_SensorMeasurements {
-public:
   float temperature;
   float pressure;
   float humidity;
@@ -169,21 +147,18 @@ public:
 
   // Constructor generates default BME280_SensorSettings.
   //(over-ride after construction if desired)
-  BME280(void);
+  BME280();
   //~BME280() = default;
+  BME280(i2c_port_t hardPort);
+
+  BME280(const BME280 &) = delete;
+  BME280 &operator=(const BME280 &) = delete;
 
   // Call to apply BME280_SensorSettings.
   // This also gets the SensorCalibration constants
-  uint8_t begin(void);
-  bool beginI2C(TwoWire &wirePort = Wire); // Called when user provides Wire
-                                           // port
+  uint8_t begin();
 
-#ifdef SoftwareWire_h
-  bool beginI2C(
-      SoftwareWire &wirePort); // Called when user provides a softwareWire port
-#endif
-
-  uint8_t getMode(void);      // Get the current mode: sleep, forced, or normal
+  uint8_t getMode();          // Get the current mode: sleep, forced, or normal
   void setMode(uint8_t mode); // Set the current mode
 
   void setTempOverSample(
@@ -204,35 +179,35 @@ public:
                                                 // level reference pressure
   float getReferencePressure();
 
-  bool isMeasuring(void); // Returns true while the device is taking measurement
+  bool isMeasuring(); // Returns true while the device is taking measurement
 
   // Software reset routine
-  void reset(void);
+  void reset();
   void readAllMeasurements(BME280_SensorMeasurements *measurements,
-                           byte tempScale = 0);
+                           bool tempScale = false);
 
   // Returns the values as floats.
-  float readFloatPressure(void);
-  float readFloatAltitudeMeters(void);
-  float readFloatAltitudeFeet(void);
+  float readFloatPressure();
+  float readFloatAltitudeMeters();
+  float readFloatAltitudeFeet();
   void readFloatPressureFromBurst(uint8_t buffer[],
                                   BME280_SensorMeasurements *measurements);
 
-  float readFloatHumidity(void);
+  float readFloatHumidity();
   void readFloatHumidityFromBurst(uint8_t buffer[],
                                   BME280_SensorMeasurements *measurements);
 
   // Temperature related methods
   void setTemperatureCorrection(float corr);
-  float readTempC(void);
-  float readTempF(void);
+  float readTempC();
+  float readTempF();
   float readTempFromBurst(uint8_t buffer[]);
 
   // Dewpoint related methods
   // From Pavel-Sayekat:
   // https://github.com/sparkfun/SparkFun_BME280_Breakout_Board/pull/6/files
-  double dewPointC(void);
-  double dewPointF(void);
+  double dewPointC();
+  double dewPointF();
 
   // The following utilities read and write
 
@@ -248,23 +223,21 @@ public:
   void writeRegister(uint8_t, uint8_t);
 
 private:
-  uint8_t
-  checkSampleValue(uint8_t userValue); // Checks for valid over sample values
+  static constexpr float DEFAULT_REFERENCE_PRESSURE = 101325.0;
+  static constexpr auto DEFAULT_HARD_PORT = I2C_NUM_0;
+  static constexpr uint8_t DEFAULT_I2C_ADDRESS = 0x77;
+
+  // Checks for valid over sample values
+  uint8_t checkSampleValue(uint8_t userValue);
   void readTempCFromBurst(uint8_t buffer[],
                           BME280_SensorMeasurements *measurements);
   void readTempFFromBurst(uint8_t buffer[],
                           BME280_SensorMeasurements *measurements);
 
-  uint8_t _wireType = HARD_WIRE; // Default to Wire.h
-  TwoWire *_hardPort =
-      NO_WIRE; // The generic connection to user's chosen I2C hardware
-
-#ifdef SoftwareWire_h
-  SoftwareWire *_softPort =
-      NO_WIRE; // Or, the generic connection to software wire port
-#endif
-
-  float _referencePressure = 101325.0; // Default but is changeable
+  float referencePressure_;
+  i2c_port_t hardPort_;
+  uint8_t hardAddr_;
 };
 
+} // namespace SparkFun
 #endif // End of __BME280_H__ definition check

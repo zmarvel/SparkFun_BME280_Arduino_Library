@@ -23,6 +23,9 @@ warranty is given.
 
 #include <math.h>
 #include "SparkFunBME280.h"
+#include <esp_log.h>
+
+namespace SparkFun {
 
 //****************************************************************************//
 //
@@ -31,22 +34,15 @@ warranty is given.
 //****************************************************************************//
 
 // Constructor -- Specifies default configuration
-BME280::BME280(void) {
-  // Construct with these default settings
+BME280::BME280()
+    : settings{}, calibration{}, t_fine{},
+      referencePressure_{DEFAULT_REFERENCE_PRESSURE},
+      hardPort_{DEFAULT_HARD_PORT}, hardAddr_{DEFAULT_I2C_ADDRESS} {}
 
-  settings.I2CAddress = 0x77; // Default, jumper open is 0x77
-  _hardPort = &Wire;          // Default to Wire port
-
-  // These are deprecated settings
-  settings.runMode = 3;  // Normal/Run
-  settings.tStandby = 0; // 0.5ms
-  settings.filter = 0;   // Filter off
-  settings.tempOverSample = 1;
-  settings.pressOverSample = 1;
-  settings.humidOverSample = 1;
-  settings.tempCorrection =
-      0.f; // correction of temperature - added to the result
-}
+BME280::BME280(i2c_port_t hardPort)
+    : settings{}, calibration{}, t_fine{},
+      referencePressure_{DEFAULT_REFERENCE_PRESSURE}, hardPort_{hardPort},
+      hardAddr_{DEFAULT_I2C_ADDRESS} {}
 
 //****************************************************************************//
 //
@@ -58,29 +54,12 @@ BME280::BME280(void) {
 //
 //****************************************************************************//
 uint8_t BME280::begin() {
-  delay(2); // Make sure sensor had enough time to turn on. BME280 requires 2ms
-            // to start up.
-
-  // Check the settings structure values to determine how to setup the device
-
-  // Removing port begin from library. This should be done by user otherwise
-  // this library will overwrite Wire settings such as clock speed.
-  //  switch(_wireType)
-  //  {
-  //  	case(HARD_WIRE):
-  //  		_hardPort->begin(); //The caller can begin their port
-  //  and set the speed. We just confirm it here otherwise it can be hard to
-  //  debug. 		break; 	case(SOFT_WIRE): 	#ifdef SoftwareWire_h
-  //  _softPort->begin();
-  //  //The caller can begin their port and set the speed. We just confirm it
-  //  here otherwise it can be hard to debug. 	#endif 		break;
-  //  }
-
   // Check communication with IC before anything else
-  uint8_t chipID =
-      readRegister(BME280_CHIP_ID_REG); // Should return 0x60 or 0x58
-  if (chipID != 0x58 && chipID != 0x60) // Is this BMP or BME?
-    return (chipID);                    // This is not BMP nor BME!
+  uint8_t chipID = readRegister(BME280_CHIP_ID_REG); // Should return 0x60 or
+                                                     // 0x58 Is this BMP or BME?
+  if (chipID != 0x58 && chipID != 0x60) {
+    return chipID; // This is not BMP nor BME!
+  }
 
   // Reading all compensation data, range 0x88:A1, 0xE1:E7
   calibration.dig_T1 = ((uint16_t)((readRegister(BME280_DIG_T1_MSB_REG) << 8) +
@@ -121,37 +100,9 @@ uint8_t BME280::begin() {
                  ((readRegister(BME280_DIG_H4_LSB_REG) >> 4) & 0x0F)));
   calibration.dig_H6 = ((int8_t)readRegister(BME280_DIG_H6_REG));
 
-  // Most of the time the sensor will be init with default values
-  // But in case user has old/deprecated code, use the settings.x values
-  setStandbyTime(settings.tStandby);
-  setFilter(settings.filter);
-  setPressureOverSample(settings.pressOverSample); // Default of 1x oversample
-  setHumidityOverSample(settings.humidOverSample); // Default of 1x oversample
-  setTempOverSample(settings.tempOverSample);      // Default of 1x oversample
-
   setMode(MODE_NORMAL); // Go!
 
-  return (readRegister(BME280_CHIP_ID_REG)); // Should return 0x60
-}
-
-// Begin comm with BME280 over I2C
-bool BME280::beginI2C(TwoWire &wirePort) {
-  _hardPort = &wirePort;
-  _wireType = HARD_WIRE;
-
-  settings.commInterface = I2C_MODE;
-  // settings.I2CAddress = 0x77; //We assume user has set the I2C address using
-  // setI2CAddress()
-
-  uint8_t chipID = begin();
-
-  if (chipID == 0x58)
-    return (true); // Begin normal init with these settings. Should return chip
-                   // ID of 0x58 for BMP
-  if (chipID == 0x60)
-    return (true); // Begin normal init with these settings. Should return chip
-                   // ID of 0x60 for BME
-  return (false);
+  return chipID;
 }
 
 // Set the mode bits in the ctrl_meas register
@@ -309,7 +260,7 @@ uint8_t BME280::checkSampleValue(uint8_t userValue) {
 // Set the global setting for the I2C address we want to communicate with
 // Default is 0x77
 void BME280::setI2CAddress(uint8_t address) {
-  settings.I2CAddress = address; // Set the I2C address for this device
+  hardAddr_ = address; // Set the I2C address for this device
 }
 
 // Check the measuring bit and return true while device is taking measurement
@@ -331,12 +282,12 @@ void BME280::reset(void) { writeRegister(BME280_RST_REG, 0xB6); }
 // readout tempScale = 0 for Celsius scale (default setting) tempScale = 1 for
 // Fahrenheit scale
 void BME280::readAllMeasurements(BME280_SensorMeasurements *measurements,
-                                 byte tempScale) {
+                                 bool tempScale) {
 
   uint8_t dataBurst[8];
   readRegisterRegion(dataBurst, BME280_MEASUREMENTS_REG, 8);
 
-  if (tempScale == 0) {
+  if (!tempScale) {
     readTempCFromBurst(dataBurst, measurements);
   } else {
     readTempFFromBurst(dataBurst, measurements);
@@ -412,7 +363,7 @@ void BME280::readFloatPressureFromBurst(
   }
 }
 
-// Sets the internal variable _referencePressure so the altitude is calculated
+// Sets the internal variable referencePressure_ so the altitude is calculated
 // properly. This is also known as "sea level pressure" and is in Pascals. The
 // value is probably within 10% of 101325. This varies based on the weather:
 // https://en.wikipedia.org/wiki/Atmospheric_pressure#Mean_sea-level_pressure
@@ -420,11 +371,11 @@ void BME280::readFloatPressureFromBurst(
 // if you are concerned about accuracy or precision, make sure to pull the
 // "sea level pressure"value from a trusted source like NOAA.
 void BME280::setReferencePressure(float refPressure) {
-  _referencePressure = refPressure;
+  referencePressure_ = refPressure;
 }
 
 // Return the local reference pressure
-float BME280::getReferencePressure() { return (_referencePressure); }
+float BME280::getReferencePressure() { return (referencePressure_); }
 
 float BME280::readFloatAltitudeMeters(void) {
   float heightOutput = 0;
@@ -439,7 +390,7 @@ float BME280::readFloatAltitudeMeters(void) {
   // code on those planets. Interplanetary selfies are welcome, however.
   heightOutput =
       ((float)-44330.77) *
-      (pow(((float)readFloatPressure() / (float)_referencePressure), 0.190263) -
+      (pow(((float)readFloatPressure() / (float)referencePressure_), 0.190263) -
        (float)1); // Corrected, see issue 30
   return heightOutput;
 }
@@ -636,39 +587,126 @@ double BME280::dewPointF(void) {
 //****************************************************************************//
 void BME280::readRegisterRegion(uint8_t *outputPointer, uint8_t offset,
                                 uint8_t length) {
-  // define pointer that will point to the external space
-  uint8_t i = 0;
-  char c = 0;
+  auto cmd = i2c_cmd_link_create();
 
-  _hardPort->beginTransmission(settings.I2CAddress);
-  _hardPort->write(offset);
-  _hardPort->endTransmission();
-
-  // request bytes from slave device
-  _hardPort->requestFrom(settings.I2CAddress, length);
-  while ((_hardPort->available()) &&
-         (i < length)) // slave may send less than requested
-  {
-    c = _hardPort->read(); // receive a byte as character
-    *outputPointer = c;
-    outputPointer++;
-    i++;
+  if (const auto status = i2c_master_start(cmd); status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
   }
+
+  if (const auto status =
+          i2c_master_write_byte(cmd, (hardAddr_ << 1) | I2C_MASTER_WRITE, true);
+      status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status = i2c_master_write_byte(cmd, offset, true);
+      status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status = i2c_master_start(cmd); status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status =
+          i2c_master_write_byte(cmd, (hardAddr_ << 1) | I2C_MASTER_READ, true);
+      status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status =
+          i2c_master_read(cmd, outputPointer, length - 1, I2C_MASTER_ACK);
+      status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status = i2c_master_read_byte(
+          cmd, outputPointer + (length - 1), I2C_MASTER_NACK);
+      status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status = i2c_master_stop(cmd); status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status =
+          i2c_master_cmd_begin(hardPort_, cmd, 1000 / portTICK_RATE_MS);
+      status != ESP_OK) {
+    // TODO
+  }
+  i2c_cmd_link_delete(cmd);
 }
 
+constexpr const char *TAG = "BME280";
 uint8_t BME280::readRegister(uint8_t offset) {
-  // Return value
-  uint8_t result = 0;
-  uint8_t numBytes = 1;
-  _hardPort->beginTransmission(settings.I2CAddress);
-  _hardPort->write(offset);
-  _hardPort->endTransmission();
+  auto cmd = i2c_cmd_link_create();
 
-  _hardPort->requestFrom(settings.I2CAddress, numBytes);
-  while (_hardPort->available()) // slave may send less than requested
-  {
-    result = _hardPort->read(); // receive a byte as a proper uint8_t
+  if (const auto status = i2c_master_start(cmd); status != ESP_OK) {
+    ESP_LOGE(TAG, "i2c_master_start: 0x%x", status);
+    i2c_cmd_link_delete(cmd);
+    return {};
   }
+
+  if (const auto status =
+          i2c_master_write_byte(cmd, (hardAddr_ << 1) | I2C_MASTER_WRITE, true);
+      status != ESP_OK) {
+    ESP_LOGE(TAG, "i2c_master_write_byte: 0x%x", status);
+    i2c_cmd_link_delete(cmd);
+    return {};
+  }
+
+  if (const auto status = i2c_master_write_byte(cmd, offset, true);
+      status != ESP_OK) {
+    ESP_LOGE(TAG, "i2c_master_write_byte: 0x%x", status);
+    i2c_cmd_link_delete(cmd);
+    return {};
+  }
+
+  if (const auto status = i2c_master_start(cmd); status != ESP_OK) {
+    ESP_LOGE(TAG, "i2c_master_start: 0x%x", status);
+    i2c_cmd_link_delete(cmd);
+    return {};
+  }
+
+  if (const auto status =
+          i2c_master_write_byte(cmd, (hardAddr_ << 1) | I2C_MASTER_READ, true);
+      status != ESP_OK) {
+    ESP_LOGE(TAG, "i2c_master_write_byte: 0x%x", status);
+    i2c_cmd_link_delete(cmd);
+    return {};
+  }
+
+  uint8_t result{};
+  if (const auto status = i2c_master_read_byte(cmd, &result, I2C_MASTER_NACK);
+      status != ESP_OK) {
+    ESP_LOGE(TAG, "i2c_master_read_byte: 0x%x", status);
+    i2c_cmd_link_delete(cmd);
+    return {};
+  }
+
+  if (const auto status = i2c_master_stop(cmd); status != ESP_OK) {
+    ESP_LOGE(TAG, "i2c_master_stop: 0x%x", status);
+    i2c_cmd_link_delete(cmd);
+    return {};
+  }
+
+  if (const auto status =
+          i2c_master_cmd_begin(hardPort_, cmd, 1000 / portTICK_RATE_MS);
+      status != ESP_OK) {
+    ESP_LOGE(TAG, "i2c_master_cmd_begin(i2c_num=%d): 0x%x", hardPort_, status);
+    // TODO
+  }
+
+  i2c_cmd_link_delete(cmd);
   return result;
 }
 
@@ -681,8 +719,40 @@ int16_t BME280::readRegisterInt16(uint8_t offset) {
 }
 
 void BME280::writeRegister(uint8_t offset, uint8_t dataToWrite) {
-  _hardPort->beginTransmission(settings.I2CAddress);
-  _hardPort->write(offset);
-  _hardPort->write(dataToWrite);
-  _hardPort->endTransmission();
+  auto cmd = i2c_cmd_link_create();
+  if (const auto status = i2c_master_start(cmd); status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status =
+          i2c_master_write_byte(cmd, (hardAddr_ << 1) | I2C_MASTER_WRITE, true);
+      status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status = i2c_master_write_byte(cmd, offset, true);
+      status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status = i2c_master_write_byte(cmd, dataToWrite, true);
+      status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status = i2c_master_stop(cmd); status != ESP_OK) {
+    i2c_cmd_link_delete(cmd);
+    return;
+  }
+
+  if (const auto status =
+          i2c_master_cmd_begin(hardPort_, cmd, 1000 / portTICK_PERIOD_MS);
+      status != ESP_OK) {
+  }
+  i2c_cmd_link_delete(cmd);
 }
+} // namespace SparkFun
